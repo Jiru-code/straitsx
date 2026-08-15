@@ -28,24 +28,21 @@ def test_pays_402_challenge_and_returns_card(monkeypatch):
         calls["n"] += 1
         if calls["n"] == 1:
             assert "PAYMENT-SIGNATURE" not in request.headers
+            challenge = {
+                "scheme": "exact",
+                "network": "eip155:43113",
+                "amount": "15000000",
+                "payTo": TEST_PAY_TO,
+                "asset": TEST_ASSET,
+                "maxTimeoutSeconds": 300,
+                "chainId": 43113,
+                "extra": {"assetTransferMethod": "eip3009", "name": "XSGD", "version": "2"},
+            }
+            payment_required = base64.b64encode(json.dumps(challenge).encode()).decode()
             return httpx.Response(
                 402,
-                json={
-                    "x402Version": 1,
-                    "error": "PAYMENT-SIGNATURE header is required",
-                    "accepts": [
-                        {
-                            "scheme": "exact",
-                            "network": "eip155:43113",
-                            "amount": "15000000",
-                            "payTo": TEST_PAY_TO,
-                            "asset": TEST_ASSET,
-                            "maxTimeoutSeconds": 300,
-                            "chainId": 43113,
-                            "extra": {"assetTransferMethod": "eip3009", "name": "XSGD", "version": "2"},
-                        }
-                    ],
-                },
+                json={"x402Version": 1, "error": "PAYMENT-SIGNATURE header is required"},
+                headers={"payment-required": payment_required},
             )
         assert "PAYMENT-SIGNATURE" in request.headers
         payload = json.loads(base64.b64decode(request.headers["PAYMENT-SIGNATURE"]))
@@ -53,6 +50,8 @@ def test_pays_402_challenge_and_returns_card(monkeypatch):
         assert auth["value"] == "15000000"
         assert auth["to"] == TEST_PAY_TO
         assert auth["from"].lower() == TEST_WALLET.lower()
+        assert payload["accepted"]["amount"] == "15000000"
+        assert payload["accepted"]["payTo"] == TEST_PAY_TO
         return httpx.Response(
             200,
             json={

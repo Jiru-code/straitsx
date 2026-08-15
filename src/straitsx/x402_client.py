@@ -1,24 +1,13 @@
 """Handles the x402 payment flow against StraitsX's cardapi endpoint.
 
 Flow:
-  1. POST the cardapi URL returned by the `get_card_sandbox` (or production
-     equivalent) MCP tool.
-  2. Expect an HTTP 402 response describing what payment is required (price,
-     pay-to address, asset contract, EIP-712 domain info for signing).
+  1. POST the cardapi URL returned by the `get_card_sandbox` MCP tool.
+  2. Expect HTTP 402 with a base64-encoded `PAYMENT-REQUIRED` header
+     containing the challenge (payTo, amount, asset, network, EIP-712 info).
   3. Sign an EIP-3009 TransferWithAuthorization for that amount of XSGD.
-  4. Retry the request with a `PAYMENT-SIGNATURE` header carrying the signed
-     authorization.
+  4. Retry with a base64-encoded `PAYMENT-SIGNATURE` header.
   5. On success, the response body contains card_opaque_id, card_html, and
      settlement_tx.
-
-CAVEAT: the exact JSON shape of the 402 challenge body below follows the
-published x402 "exact" scheme spec (x402.org / Coinbase's x402 whitepaper):
-`{"x402Version": 1, "accepts": [{"scheme","network","payTo","asset",
-"maxAmountRequired","extra": {"name","version"}, ...}]}`. This was written
-without being able to reach card.straitsx.ai to confirm the live response
-matches that shape exactly -- if StraitsX's cardapi differs, adjust
-`_parse_challenge()` below accordingly. Run a real request against sandbox
-and print `first.json()` to check before relying on this in a demo.
 """
 from __future__ import annotations
 
@@ -51,9 +40,8 @@ class X402Challenge:
     chain_id: Optional[int] = None
 
 
-def _parse_challenge(body: dict) -> X402Challenge:
+def _parse_challenge(accept: dict, x402_version: int = 1) -> X402Challenge:
     try:
-        accept = body["accepts"][0]
         extra = accept.get("extra", {}) or {}
         return X402Challenge(
             pay_to=accept["payTo"],
@@ -63,13 +51,13 @@ def _parse_challenge(body: dict) -> X402Challenge:
             token_version=extra.get("version", "1"),
             scheme=accept.get("scheme", "exact"),
             network=accept.get("network", ""),
-            x402_version=body.get("x402Version", 1),
+            x402_version=x402_version,
             valid_before=int(time.time()) + int(accept.get("maxTimeoutSeconds", 3600)),
             chain_id=accept.get("chainId"),
         )
-    except (KeyError, IndexError, TypeError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise X402PaymentError(
-            f"Unrecognized 402 challenge shape from cardapi: {body!r}. "
+            f"Unrecognized 402 challenge shape: {accept!r}. "
             "Update x402_client._parse_challenge() to match the real response."
         ) from exc
 
@@ -104,7 +92,22 @@ def pay_and_fetch(
                 raise X402PaymentError(f"cardapi returned status {first.status_code} before any payment challenge: {detail!r}")
             return first.json()  # no payment challenge needed / already settled
 
-        challenge = _parse_challenge(first.json())
+        payment_required = first.headers.get("payment-required", "")
+        if payment_required:
+            challenge_data = json.loads(base64.b64decode(payment_required))
+        else:
+            challenge_data = first.json()
+
+        x402_version = 1
+        if isinstance(challenge_data, dict) and "accepts" in challenge_data:
+            x402_version = challenge_data.get("x402Version", 1)
+            accept = challenge_data["accepts"][0]
+        elif isinstance(challenge_data, list):
+            accept = challenge_data[0]
+        else:
+            accept = challenge_data
+
+        challenge = _parse_challenge(accept, x402_version)
 
         auth = build_transfer_with_authorization(
             private_key=wallet_private_key,
@@ -120,11 +123,9 @@ def pay_and_fetch(
 
         payment_payload = {
             "x402Version": challenge.x402_version,
-            "scheme": challenge.scheme,
-            "network": challenge.network,
             "payload": auth,
+            "accepted": accept,
         }
-        # x402 typically base64-encodes the JSON payment payload into the header.
         payment_header = base64.b64encode(json.dumps(payment_payload).encode()).decode()
 
         second = client.post(cardapi_url, json=json_body, headers={"PAYMENT-SIGNATURE": payment_header})
