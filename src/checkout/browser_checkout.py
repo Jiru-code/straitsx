@@ -21,8 +21,12 @@ class CheckoutReceipt:
 
 
 def _resolve_url(url: str) -> str:
-    if url.startswith("http://") or url.startswith("https://") or url.startswith("file://"):
+    if url.startswith("http://") or url.startswith("https://"):
         return url
+    if url.startswith("file://"):
+        # Resolve relative file:// paths to absolute
+        raw_path = url.replace("file://", "")
+        return f"file://{Path(raw_path).resolve()}"
     path = Path(url).resolve()
     return f"file://{path}"
 

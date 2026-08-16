@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "straitsx-agentic-payments"
+version = "0.1.0"
+description = "Agentic payments on XSGD / Avalanche C-Chain — AI agent that discovers products, enforces spending policy, issues virtual cards, and completes checkout autonomously."
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain>=0.3.0",
+    "langchain-openai>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-mcp-adapters>=0.1.0",
+    "web3>=6.20.0",
+    "httpx>=0.27.0",
+    "mcp>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "beautifulsoup4>=4.12.0",
+    "playwright>=1.45.0",
+    "pydantic>=2.7.0",
+    "streamlit>=1.36.0",
+]
+
+[project.scripts]
+agentic-pay = "src.main:main"

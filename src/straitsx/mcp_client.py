@@ -36,10 +36,28 @@ class StraitsXCardMCPClient:
 
     @asynccontextmanager
     async def _session(self):
-        async with sse_client(self.url) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield session
+        """Open an SSE session to the MCP server with timeout + retry."""
+        import httpx as _httpx
+
+        last_exc: Exception | None = None
+        for attempt in range(2):  # one retry on connection failure
+            try:
+                async with sse_client(self.url, timeout=15) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        yield session
+                        return  # success — no retry
+            except (_httpx.ConnectError, _httpx.TimeoutException, OSError) as exc:
+                last_exc = exc
+                if attempt == 0:
+                    import asyncio
+                    await asyncio.sleep(1)  # brief pause before retry
+                    continue
+                raise RuntimeError(
+                    f"Could not connect to StraitsX MCP server at {self.url} "
+                    f"after 2 attempts. Check your network and STRAITSX_MCP_SANDBOX_URL. "
+                    f"Error: {last_exc}"
+                ) from last_exc
 
     async def list_tools(self) -> list[dict]:
         """Returns every tool the MCP server exposes: name, description, input schema."""
@@ -159,4 +177,19 @@ def _parse_mcp_result(result: Any) -> dict:
                 return json.loads(text)
             except json.JSONDecodeError:
                 continue
-    raise RuntimeError(f"Could not parse MCP tool result as JSON: {result!r}")
+    # Build a helpful diagnostic message
+    raw_texts = []
+    for item in getattr(result, "content", []) or []:
+        text = getattr(item, "text", None)
+        if text:
+            raw_texts.append(text)
+    hint = (
+        f"Raw text blocks received: {raw_texts!r}" if raw_texts
+        else f"No text content blocks found in result: {result!r}"
+    )
+    raise RuntimeError(
+        f"Could not parse MCP tool result as JSON. {hint}. "
+        "This may mean the server returned an unexpected format — run "
+        "`python -m src.straitsx.list_mcp_tools` to inspect the server's "
+        "current tool schemas."
+    )

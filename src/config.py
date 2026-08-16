@@ -23,7 +23,7 @@ def _list(name: str, default: str) -> list[str]:
 @dataclass(frozen=True)
 class Settings:
     # LLM
-    anthropic_api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
+    openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
 
     # Avalanche C-Chain
     avalanche_rpc_url: str = field(
@@ -66,6 +66,21 @@ class Settings:
 
     # Checkout
     checkout_headless: bool = field(default_factory=lambda: _bool("CHECKOUT_HEADLESS", True))
+
+    # Sealed Intent Protocol (SIP)
+    sip_enabled: bool = field(default_factory=lambda: _bool("SIP_ENABLED", True))
+    sip_keyword_threshold: float = field(
+        default_factory=lambda: float(os.getenv("SIP_KEYWORD_THRESHOLD", "0.3"))
+    )
+    sip_consistency_threshold: float = field(
+        default_factory=lambda: float(os.getenv("SIP_CONSISTENCY_THRESHOLD", "0.5"))
+    )
+    sip_max_title_length: int = field(
+        default_factory=lambda: int(os.getenv("SIP_MAX_TITLE_LENGTH", "200"))
+    )
+    sip_block_on_injection: bool = field(
+        default_factory=lambda: _bool("SIP_BLOCK_ON_INJECTION", True)
+    )
 
 
 settings = Settings()

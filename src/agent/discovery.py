@@ -20,20 +20,37 @@ class ProductListing:
     title: str
     price_sgd: float
     url: str
+    final_url: str = ""  # post-redirect URL (may differ from ``url``)
+    raw_html: str = ""   # kept for the sanitizer; never passed to the LLM
 
 
-def _load_html(url: str) -> str:
+def _load_html(url: str) -> tuple[str, str]:
+    """Fetch page HTML and return ``(html, final_url)``.
+
+    ``final_url`` is the URL after any redirects; for local files it's
+    the same as the input ``url``.
+    """
     if url.startswith("file://") or Path(url).exists():
         path = url.replace("file://", "")
-        return Path(path).read_text()
+        return Path(path).read_text(), url
     resp = httpx.get(url, timeout=10.0, follow_redirects=True)
     resp.raise_for_status()
-    return resp.text
+    return resp.text, str(resp.url)
 
 
-def discover_product(url: str) -> ProductListing:
-    html = _load_html(url)
-    soup = BeautifulSoup(html, "html.parser")
+def discover_product(url: str, html: str | None = None) -> ProductListing:
+    """Scrape a product page and return a ``ProductListing``.
+
+    If *html* is provided it's used directly (useful when the caller
+    already fetched the page).  Otherwise the page is fetched from *url*.
+    """
+    if html is not None:
+        final_url = url
+        raw_html = html
+    else:
+        raw_html, final_url = _load_html(url)
+
+    soup = BeautifulSoup(raw_html, "html.parser")
 
     title_tag = soup.find(id="product-title") or soup.find("h1") or soup.find("title")
     title = title_tag.get_text(strip=True) if title_tag else "Unknown item"
@@ -49,4 +66,10 @@ def discover_product(url: str) -> ProductListing:
             raise ValueError(f"Could not find an SGD price on page: {url}")
         price = float(match.group(1).replace(",", ""))
 
-    return ProductListing(title=title, price_sgd=price, url=url)
+    return ProductListing(
+        title=title,
+        price_sgd=price,
+        url=url,
+        final_url=final_url,
+        raw_html=raw_html,
+    )

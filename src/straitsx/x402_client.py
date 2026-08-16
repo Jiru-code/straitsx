@@ -81,7 +81,18 @@ def pay_and_fetch(
     this couldn't be tested against the live server.
     """
     with httpx.Client(timeout=timeout) as client:
-        first = client.post(cardapi_url, json=json_body)
+        try:
+            first = client.post(cardapi_url, json=json_body)
+        except httpx.ConnectError as exc:
+            raise X402PaymentError(
+                f"Could not connect to cardapi at {cardapi_url}. "
+                f"Check your network connection. Error: {exc}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise X402PaymentError(
+                f"Timed out connecting to cardapi at {cardapi_url} "
+                f"(timeout={timeout}s). The server may be slow or down."
+            ) from exc
 
         if first.status_code != 402:
             if first.status_code >= 400:
@@ -134,11 +145,18 @@ def pay_and_fetch(
                 detail = second.json()
             except ValueError:
                 detail = second.text
+            # Surface the most common failure mode prominently
+            detail_str = str(detail).lower()
+            if "balance" in detail_str or "insufficient" in detail_str:
+                raise X402PaymentError(
+                    f"Insufficient testnet XSGD balance to pay the x402 challenge. "
+                    f"Your wallet ({wallet_address}) needs testnet XSGD on chain {chain_id}. "
+                    f"Server response: {detail!r}"
+                )
             raise X402PaymentError(
                 f"cardapi rejected the payment (status {second.status_code}): {detail!r}. "
-                "This means the PAYMENT-SIGNATURE payload didn't verify -- check `detail` above "
-                "for the server's specific reason (bad encoding, wrong signature format, "
-                "insufficient testnet XSGD balance, expired validBefore, etc.) before changing "
-                "anything blind."
+                "Possible causes: bad signature format, expired validBefore timestamp, "
+                "insufficient testnet XSGD balance, or wrong chain_id. "
+                "Check the server's error detail above."
             )
         return second.json()
