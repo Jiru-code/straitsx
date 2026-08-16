@@ -2,13 +2,15 @@
 submits the payment form. Runs against the local demo shop fixture by
 default; point CHECKOUT at a real sandbox merchant to test against something
 live.
+
+On Streamlit Cloud (or any environment without Playwright browsers
+installed) the checkout is simulated so the rest of the demo still works.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
-
-from playwright.sync_api import sync_playwright
 
 from src.config import settings
 from src.straitsx.client import VirtualCard
@@ -18,6 +20,11 @@ from src.straitsx.client import VirtualCard
 class CheckoutReceipt:
     success: bool
     detail: str
+
+
+def _is_streamlit_cloud() -> bool:
+    """Detect the Streamlit Cloud runtime (sets HOME=/home/adminuser)."""
+    return os.getenv("HOME", "").startswith("/home/adminuser")
 
 
 def _resolve_url(url: str) -> str:
@@ -31,7 +38,25 @@ def _resolve_url(url: str) -> str:
     return f"file://{path}"
 
 
+def _simulate_checkout(product_url: str, card: VirtualCard) -> CheckoutReceipt:
+    """Return a simulated successful receipt (no browser required)."""
+    masked_pan = f"****-****-****-{card.pan[-4:]}" if len(card.pan) >= 4 else card.pan
+    return CheckoutReceipt(
+        success=True,
+        detail=(
+            f"[simulated] Payment of ${card.amount_sgd:.2f} SGD "
+            f"with card {masked_pan} completed for {product_url}"
+        ),
+    )
+
+
 def run_checkout(product_url: str, card: VirtualCard) -> CheckoutReceipt:
+    # On Streamlit Cloud Playwright browsers aren't available — simulate.
+    if _is_streamlit_cloud():
+        return _simulate_checkout(product_url, card)
+
+    from playwright.sync_api import sync_playwright
+
     url = _resolve_url(product_url)
 
     with sync_playwright() as p:
