@@ -4,17 +4,32 @@ Run with:
     streamlit run app.py
 
 Supports two modes (selectable in the sidebar):
-- **AI Agent** — LLM-driven agentic loop (requires GEMINI_API_KEY)
+- **AI Agent** — LLM-driven agentic loop (requires OPENAI_API_KEY)
 - **Demo Mode** — deterministic pipeline, no API key needed
 """
 from __future__ import annotations
+
+# ── Bridge Streamlit Cloud secrets into os.environ ──────────────
+# Streamlit Cloud exposes secrets via st.secrets, NOT os.environ.
+# config.py reads os.getenv(), so we must inject them BEFORE any
+# src.* imports (which trigger Settings() creation at import time).
+import os
+
+import streamlit as st
+
+try:
+    for _key, _val in st.secrets.items():
+        if isinstance(_val, str):
+            os.environ.setdefault(_key, _val)
+except FileNotFoundError:
+    pass  # no secrets file (local dev uses .env instead)
+# ────────────────────────────────────────────────────────────────
 
 import json
 import re
 import time
 import uuid
 
-import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent.graph import DEMO_SHOP_URL
